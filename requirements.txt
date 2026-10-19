@@ -1,0 +1,13 @@
+# Phase 0 tooling
+psycopg2-binary>=2.9     # Postgres / Supabase connection (importer, audit --db)
+openpyxl>=3.1            # reading .xlsx directly (future full-workbook import path)
+# CSV import uses the stdlib csv module; no extra dep needed for the current path.
+
+# Generate Console (first UI)
+fastapi>=0.110           # web API
+uvicorn>=0.29            # ASGI dev server
+requests>=2.31           # OpenRouter calls
+
+# Redesign mode (compile OUR curated MJML -> bulletproof HTML, locally; no Node)
+mjml-python==1.4.1       # Rust-backed MJML compiler; prebuilt wheels incl. Windows x86-64
+# Fallback engine if the wheel above ever fails to install: `mrml` (wire in app/mjml_engine.py).
