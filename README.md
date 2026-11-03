@@ -1,75 +1,121 @@
-# ASAT Content Factory
+# ASAT Content Studio
 
-The interface is now **ASAT Content Studio**, with separate source/translation
-review views, scoped batch actions, activity history and approved-only exports.
-See [Readiness and operating guide](docs/READINESS.md) for verified behavior,
-known limitations, backup instructions and the production scaling gates.
+Authorized **security-awareness-training (SAT)** content studio for Aspire. It
+produces phishing-simulation email templates for clients' *own* employees under
+per-engagement authorization. The artifacts resemble a phishing kit; the control
+layer (see [Safety invariants](#safety-invariants)) is what keeps it legitimate,
+so those controls are load-bearing and must be preserved in any integration.
 
-Current scope, verified gaps and next steps: [Project status](docs/PROJECT-STATUS.md).
-The console now includes library search, durable local reviews, translation
-approval and approved JSON export. Run on localhost; multi-user authentication
-and production database publishing are still pending.
+Current scope is a **single-worker localhost review studio**: paste or load a base
+template → vary wording or redesign the layout → translate → human-review and
+approve → export approved content. It does **not** send mail, resolve recipient
+PII, or deploy itself.
 
-Checks: `python -m unittest discover -s tests -v` (requires `httpx`).
+## Requirements
 
-Authorized security-awareness-training (SAT) content factory. Strategy lives in the roadmap doc (Claude Doc) and in `PRD.md` / `ARCHITECTURE.md` / `TASKS.md`. Controls summary in `CLAUDE.md`.
+- Python 3.10+
+- Dependencies in `requirements.txt` (runtime) and `requirements-dev.txt` (tests)
 
-## Generate Console (first UI)
-
-Paste an email template → pick target languages → enter a company name → get a personalized, localized preview per language.
-
-### Run
+## Setup & run
 
 ```bash
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app
+python -m pip install -r requirements.txt -r requirements-dev.txt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://localhost:8000  (or use the `generate-console` entry in `.claude/launch.json`).
+Open http://127.0.0.1:8000.
 
-Use the same Python environment for installation and startup (`python -m pip
-install -r requirements.txt`). The development launcher reloads backend changes.
-If the page reports a missing server feature, stop the old server and restart
-with the command above: refreshing the browser alone cannot reload Python routes.
+## Configuration
 
-### Real translation (OpenRouter)
+Copy `.env.example` to `.env` and fill in the values. All credentials are
+**server-side only** — they are never returned by the API or sent to the browser.
 
-Without a key it runs in **MOCK mode** — the pipeline works but text isn't actually translated. To enable real translation, set the key in your environment and restart:
+| Variable | Purpose |
+|---|---|
+| `OPENROUTER_API_KEY` | OpenRouter key for translation/redesign. Unset → **MOCK mode** (pipeline runs, text is not actually translated). |
+| `OPENROUTER_MODEL` | Default model (`openai/gpt-4.1-mini`). |
+| `OPENROUTER_TRANSLATION_MODEL` / `OPENROUTER_DESIGN_MODEL` | Per-task overrides. |
+| `DATABASE_URL` | Postgres/Supabase connection for the publish path. Unset → publish runs **dry-run** and writes nothing. |
+
+Restart the server after changing configuration.
+
+## Tests
 
 ```bash
-export OPENROUTER_API_KEY=...            # Windows: set OPENROUTER_API_KEY=...
-export OPENROUTER_MODEL=openai/gpt-4o-mini   # optional
+python -m unittest discover -s tests -v   # 36 tests
+python -m compileall -q app scripts
 ```
 
-The key is read from the environment only — never hard-code or commit it.
+The suite covers placeholder integrity, immutable-HTML guarantees, layout/palette
+combinations, provider-error fail-closed behavior, and the approval/audit workflow.
 
-### How it works
+## HTTP API
 
-- `app/main.py` — FastAPI: `/api/languages`, `/api/generate`, serves the UI.
-- `app/translate.py` — translate + re-brand one template into one language. Masks `{{placeholders}}` so recipient/link tokens are never translated or filled; preserves HTML.
-- `app/languages.py` — the tiered language list (extend freely).
-- `app/static/index.html` — the single-page console.
-- `app/design.py` — curated MJML redesign archetypes + palettes (layout only).
-- `app/mjml_engine.py` — local MJML→HTML compile (`mjml-python`; offline, no Node).
-- `app/htmlsafe.py` — allow-list injection gate for redesign output (fail-closed).
+All endpoints are under `/api/` (served by `app.main:app`):
 
-### Redesign mode
+| Method | Path | Purpose |
+|---|---|---|
+| GET  | `/api/health` | Liveness + provider mode (real vs mock). |
+| GET  | `/api/languages` | Supported target languages. |
+| POST | `/api/generate` | Translate a variant into selected languages. |
+| POST | `/api/variants` | Create wording variants of a source. |
+| POST | `/api/redesign` | Compile curated MJML redesigns (local, offline). |
+| GET  | `/api/library`, `/api/library/{source_id}` | Browse the template library. |
+| GET  | `/api/workspace` | Current review workspace state. |
+| POST | `/api/seeds` | Seed workspace content. |
+| POST | `/api/items/{item_id}/review` | Approve/reject an item (append-only audit). |
+| GET  | `/api/activity` | Review activity history. |
+| GET  | `/api/export` | Export approved-only content as JSON. |
+| POST | `/api/publish` | Publish approved content to Postgres (dry-run unless `DATABASE_URL` set). |
 
-In **step 01 → "create variants"**, choose **Redesign layout** (vs Vary wording). Instead of reusing the source's raw HTML, the content is re-rendered in a clean, perfectly-aligned email design — one of four curated archetypes (plain memo, branded notice, modern card, classic corporate), rotated with a palette per version, compiled by MJML (`mjml-python`, local, no Node).
+## Project layout
 
-- The model only extracts the copy into slots; **our** MJML templates own the layout.
-- `{{placeholders}}` are masked and **never resolved**; the source's action link is routed to the new button and must survive.
-- Every redesign passes an **injection gate** (`app/htmlsafe.py`) before it is stored; fail-closed to a draft, mock results are not approvable, nothing is sent.
-- Needs the engine: `pip install -r requirements.txt` (installs `mjml-python`).
+```
+app/                 FastAPI backend + static Content Studio UI
+  main.py            app factory + routes
+  translate.py       translation / wording / redesign orchestration
+  design.py          curated MJML design archetypes (layout is ours, not the model's)
+  mjml_engine.py     local MJML → bulletproof HTML compilation (no Node, no network)
+  provider.py        server-only OpenRouter client (bounded, sanitized)
+  text_slots.py      visible-text replacement that leaves HTML bytes intact
+  store.py           durable local review workspace (SQLite)
+  publish.py         publish approved content to the Supabase/Postgres schema
+  library.py, languages.py, htmlsafe.py
+scripts/             import / normalize / audit / backup tooling
+tests/               unittest suite
+supabase/migrations/ schema contract (0001_phase0_schema.sql)
+```
 
-## Phase 0 (data foundation)
+## Integration notes
 
-- `supabase/migrations/0001_phase0_schema.sql` — schema (`supabase db push` or `psql -f`).
-- `scripts/import_workbook.py` — CSV → `source_templates` (verbatim; `--dry-run` or live).
-- `scripts/audit_vocab.py` — vocabulary reconciliation (Block 4).
-- `scripts/profile_email_csv.py` — count/profile a sheet export.
-- `docs/controlled-lists-and-variables.md` — controlled vocabulary + `{{variable}}` standard.
+For merging into the company main repo, two options:
 
-## Controls (non-negotiable)
+1. **Standalone service** — run `app.main:app` behind the main app and call the
+   `/api/*` endpoints. Simplest; keeps the control boundary intact.
+2. **Mounted sub-app** — import `app.main:app` and mount it on a path in the
+   parent FastAPI/ASGI application.
 
-Simulation content only; **nothing is sent from here**. Recipient and link tokens stay as placeholders. See `CLAUDE.md`.
+Provision the database by applying `supabase/migrations/0001_phase0_schema.sql`.
+Schema changes go in a **new** migration (`0002_*`), never by editing a frozen one.
+
+## Safety invariants
+
+These are enforced in the schema and code. **Do not relax them** when integrating:
+
+1. **The factory never emits sendable content.** The `factory_never_sendable`
+   database CHECK stays in force; nothing becomes sendable here.
+2. **Recipient PII is never resolved or stored.** `first_name`, `email`, etc.
+   remain placeholders, merged only by a downstream sender.
+3. **Link/engagement variables are system-owned.** Authors cannot set
+   `phishing_link`, `engagement_id`, `tracking_pixel`, or `training_url`.
+4. **The audit log is append-only.** No UPDATE/DELETE on `review_events`;
+   corrections are new rows.
+5. **The immutable source is never edited.** Re-run normalization from source.
+6. **Controlled vocabulary only.** New variables/categories arrive via a new
+   migration, never ad hoc.
+7. **No live credentials, deploy, or sending** are performed by this layer.
+
+> Email-client fidelity (Gmail/Outlook/mobile) is **not** verified; compilation
+> and HTML checks do not establish client rendering. Before any shared or public
+> deployment, add authentication, tenant isolation, durable jobs, production
+> secret management, HTTPS, and backups.

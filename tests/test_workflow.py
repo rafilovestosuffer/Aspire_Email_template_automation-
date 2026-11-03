@@ -144,6 +144,7 @@ class HumanizeLayerTests(unittest.TestCase):
             record.append(json['messages'][0]['content'])
             masked = json['messages'][1]['content']
             resp = MagicMock()
+            resp.status_code = 200
             resp.raise_for_status = lambda: None
             resp.json = lambda: {'choices': [{'message': {'content': masked}}]}
             return resp
@@ -156,7 +157,7 @@ class HumanizeLayerTests(unittest.TestCase):
             out = translate.make_variant(tpl, 'Acme', 0, api_key='k', model='m')
         self.assertEqual(len(prompts), 2)                       # variant pass + humanize pass
         self.assertTrue(out['humanized'])
-        self.assertEqual(out['humanize_prompt_version'], 'humanize-v1')
+        self.assertEqual(out['humanize_prompt_version'], 'humanize-v2')
         self.assertIn('human copy editor', prompts[1])          # 2nd call is the humanize prompt
         self.assertIn('{{first_name}}', out['html'])            # frozen placeholders survive
         self.assertIn('{{phishing_link}}', out['html'])
@@ -168,6 +169,7 @@ class HumanizeLayerTests(unittest.TestCase):
         def fake_post(url, headers=None, json=None, timeout=None):
             state['n'] += 1
             resp = MagicMock()
+            resp.status_code = 200
             resp.raise_for_status = lambda: None
             if state['n'] == 1:                                 # variant pass succeeds
                 masked = json['messages'][1]['content']
@@ -199,6 +201,7 @@ class HumanizeLayerTests(unittest.TestCase):
         def fake_post(url, headers=None, json=None, timeout=None):
             state['n'] += 1
             resp = MagicMock()
+            resp.status_code = 200
             resp.raise_for_status = lambda: None
             masked = json['messages'][1]['content']
             if state['n'] == 2:                                 # humanize pass smuggles a new token
@@ -322,10 +325,11 @@ class RedesignTests(unittest.TestCase):
         def fake_post(url, headers=None, json=None, timeout=None):
             sysmsg = json['messages'][0]['content']
             resp = MagicMock()
+            resp.status_code = 200
             resp.raise_for_status = lambda: None
             if 'extract the CONTENT' in sysmsg:
                 payload = ('{"preheader":"Review","headline":"Security notice",'
-                           '"greeting":"Hi there,","body_blocks":["Please review your activity."],'
+                           '"greeting":"Hi ⦑PH1⦒,","body_blocks":["Please review your activity."],'
                            '"cta_label":"Review activity","footer_note":"Training."}')
                 resp.json = lambda: {'choices': [{'message': {'content': payload}}]}
             else:                                           # humanize pass echoes masked content
@@ -348,9 +352,10 @@ class RedesignTests(unittest.TestCase):
 
         def fake_post(url, headers=None, json=None, timeout=None):
             payload = ('{"preheader":"p","headline":"<script>alert(1)</script> Alert",'
-                       '"greeting":"Hi,","body_blocks":["Body <b>x</b> & more"],'
+                       '"greeting":"Hi ⦑PH1⦒,","body_blocks":["Body <b>x</b> & more"],'
                        '"cta_label":"Go","footer_note":"f"}')
             resp = MagicMock()
+            resp.status_code = 200
             resp.raise_for_status = lambda: None
             resp.json = lambda: {'choices': [{'message': {'content': payload}}]}
             return resp

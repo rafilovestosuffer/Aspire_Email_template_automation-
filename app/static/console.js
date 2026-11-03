@@ -17,9 +17,9 @@ const $ = s=>document.querySelector(s);
 const esc = s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let variants=[],events=[],langs=[],selected=new Set(),view='sources',page=0,openId=null,raw=false,busy=false,translating=false,stop=false,libOffset=0,libTotal=0,cmpSel=null,lastSourceId=null,lastSourceHtml='';
 const pageSize=8;
-const ARCH={plain_memo:'Plain memo',branded_notice:'Branded notice',modern_card:'Modern card',corporate:'Corporate'};
+const ARCH={plain_memo:'Plain memo',branded_notice:'Branded notice',modern_card:'Signature card',corporate:'Corporate',editorial:'Editorial letter',spotlight:'Brand spotlight'};
 const varMode=()=>document.querySelector('input[name=varmode]:checked')?.value||'wording';
-let hasEngine=true;
+let hasEngine=true,comparisonWide=true;
 const title=v=>v.title || `Source ${v.id.slice(0,8)}`;
 const translations=()=>variants.flatMap(v=>(v.locales||[]).map(r=>({...r,source:v})));
 const groupKey=v=>v.group_id||v.id;                 // a source and its wording variants share one key
@@ -81,7 +81,22 @@ function localePreview(i){
   <div class="compare"><div class="comparepane"><div class="previewlabel"><span>Main template · original</span></div>${lpane}</div><div class="comparepane"><div class="previewlabel"><span>${esc(i.name)} translation</span></div>${rpane}</div></div>`;
 }
 // Right-side compare & pick: main template on the left, a chosen variant or translation on the right.
+function redesignComparison(openItem){
+ const related=variants.filter(v=>v.kind==='redesign'&&(v.id===openItem.id||v.of_source===openItem.id||groupKey(v)===groupKey(openItem)));
+ if(!related.length)return null;
+ if(openItem.kind!=='redesign'&&openItem.mode!=='source'&&!related.some(v=>v.of_source===openItem.id))return null;
+ const anchor=openItem.kind==='redesign'?openItem:related[related.length-1];
+ const designs=anchor.comparison_id?related.filter(v=>v.comparison_id===anchor.comparison_id):related.filter(v=>!v.comparison_id);
+ const original=variants.find(v=>v.id===anchor.of_source)||groupOf(anchor).find(v=>v.mode==='source');
+ const pane=(item,label,originalPane=false)=>{
+  const missing=!item,failed=item&&item.mode==='error';
+  const body=missing?'<div class="comparenote">The original was not saved with this older batch. New redesign batches preserve it automatically.</div>':failed?'<div class="comparenote">This redesign failed. The original remains unchanged.</div>':raw?`<pre class="raw">${esc(item.html)}</pre>`:`<div class="preview">${frame(item.html,item.rtl)}</div>`;
+  return `<div class="comparepane ${originalPane?'originalpane':''}"><div class="previewlabel"><span><b>${esc(label)}</b><span class="designstamp">${originalPane?'Unchanged input template':`${esc(ARCH[item.archetype]||item.archetype||'Design')} · ${esc(item.palette||'')}`}</span></span></div>${body}${item&&!failed?`<div class="compareactions">${!originalPane?`<button class="secondary" data-usepick="${item.id}">Use this redesign</button>`:''}<button class="textbutton" data-copyitem="${item.id}">Copy ${originalPane?'original':'redesign'} HTML</button></div>`:''}</div>`;
+ };
+ return `<div class="previewbody"><div class="previewlabel"><span><b>Original + ${designs.length} redesign${designs.length===1?'':'s'}</b> · Compare the changes side by side</span><span><button class="textbutton" data-wide>${comparisonWide?'Show editor':'Expand canvas'}</button> · <button class="textbutton" data-raw>${raw?'Rendered previews':'Show HTML'}</button></span></div><div class="compare compare-three">${pane(original,'Original (raw template)',true)}${designs.map((v,i)=>pane(v,`Redesign ${i+1}`)).join('')}</div></div>`;
+}
 function comparePanel(openItem){
+ const redesignView=redesignComparison(openItem);if(redesignView)return redesignView;
  const group=groupOf(openItem);
  const srcMain=group.find(v=>v.mode==='source');          // a real saved original, if one exists
  const vars=group.filter(v=>v.mode!=='source');            // wording variants (disjoint from srcMain)
@@ -96,7 +111,7 @@ function comparePanel(openItem){
  const pane=(it,rtl,lbl,human)=>{
   const bad=it&&it.mode==='error';
   const body=!it?'<div class="comparenote">Create wording variants, or translate this draft in step 02, to compare and pick here.</div>':bad?'<div class="comparenote">This attempt failed; no preview is available.</div>':raw?`<pre class="raw">${esc(it.html)}</pre>`:`<div class="preview">${frame(it.html,rtl)}</div>`;
-  return `<div class="comparepane"><div class="previewlabel"><span>${esc(lbl)}</span>${human?'<span class="badge approved">human voice</span>':''}</div>${body}</div>`;
+  return `<div class="comparepane"><div class="previewlabel"><span>${esc(lbl)}${it&&it.kind==='redesign'?`<span class="designstamp">${esc(ARCH[it.archetype]||it.archetype)} · ${esc(it.palette||'')} · ${it.layout_version?'Updated layout':'Saved layout'}</span>`:''}</span>${human?'<span class="badge approved">human voice</span>':''}</div>${body}</div>`;
  };
  const leftLbl=leftRef.mode==='source'?'Main template · original':'This draft · original language';
  const bar=rightOpts.length?`<div class="comparebar"><label for="cmp-${openItem.id}">Right panel</label><select id="cmp-${openItem.id}" data-cmp aria-label="Choose what to compare and pick">${rightOpts.map(o=>`<option value="${o.id}"${o.id===cmpSel?' selected':''}>${esc(o.label)}</option>`).join('')}</select><button class="secondary" data-usepick="${cmpSel}">Use this version</button><button class="textbutton" data-copyitem="${cmpSel}">Copy right HTML</button></div>`:'<p class="help">Create wording variants, or translate this draft in step 02, to compare versions side by side and pick one.</p>';
@@ -119,7 +134,7 @@ function render(){
   $('#pageInfo').textContent=`${items.length} items · Page ${page+1} of ${Math.max(1,Math.ceil(items.length/pageSize))}`;
   $('#pagePrev').disabled=page===0;$('#pageNext').disabled=(page+1)*pageSize>=items.length;
   $('#selectPage').hidden=view!=='sources';
- }refreshButtons();
+ }$('main').classList.toggle('comparison-focus',comparisonWide&&!!$('.compare-three'));refreshButtons();
 }
 async function setView(next){view=next;page=0;openId=null;raw=false;if(view==='activity')events=(await api('/api/activity')).events;render();}
 async function searchLibrary(reset=true){
@@ -138,12 +153,13 @@ async function createDraft(original){
  busy=true;refreshButtons();notice(original?'Saving source…':redesign?'Creating redesigns (new aligned layouts)…':'Creating wording variants in the source language…');
  const tpl=$('#tpl').value;
  const body={template_html:tpl,company_name:$('#company').value.trim(),title:$('#title').value.trim(),amount:original?1:amount};
- if(!original){body.humanize=$('#humanize').checked;if(lastSourceId&&tpl===lastSourceHtml)body.source_id=lastSourceId;}
+ if(!original){body.copy_length=$('#copyLength').value;body.design_style=$('#designStyle').value;body.palette=$('#palette').value;body.humanize=$('#humanize').checked;if(lastSourceId&&tpl===lastSourceHtml)body.source_id=lastSourceId;}
  try{const d=await api(original?'/api/seeds':redesign?'/api/redesign':'/api/variants',body);
- if(original){lastSourceId=d.id;lastSourceHtml=tpl;}
- const added=original?[d]:d.variants;selected=new Set(added.map(i=>i.id));view='sources';page=0;$('#workspaceSearch').value='';$('#statusFilter').value='all';await reload();
+ if(original){lastSourceId=d.id;lastSourceHtml=tpl;}else if(d.source){lastSourceId=d.source.id;lastSourceHtml=tpl;}
+ const added=original?[d]:d.variants;if(redesign&&added.length)openId=added[added.length-1].id;selected=new Set(added.map(i=>i.id));view='sources';page=0;$('#workspaceSearch').value='';$('#statusFilter').value='all';await reload();
+ const skipped=added.filter(i=>i.humanize_error).length;
  const failures=added.filter(i=>i.mode==='error').length,humanized=original?0:added.filter(i=>i.humanized).length,word=redesign?'redesign':'variant';
- notice(failures?`${failures} ${word} attempt${failures===1?'':'s'} failed. Review the error details; failed outputs cannot be approved.`:original?'Saved. Preview and approve the source, then translate it into your selected languages.':`Created ${added.length} ${word}${added.length===1?'':'s'}${humanized?` · ${humanized} humanized`:''}. Open one to compare against the main and pick.`,failures?'error':'success');
+ notice(failures?`${failures} ${word} attempt${failures===1?'':'s'} failed. Review the error details; failed outputs cannot be approved.`:original?'Saved. Preview and approve the source, then translate it into your selected languages.':`Created ${added.length} ${word}${added.length===1?'':'s'}${humanized?` · ${humanized} humanized`:''}. Open one to compare against the main and pick.${skipped?` Natural-tone pass failed for ${skipped}; original generated copy was kept.`:''}`,failures?'error':'success');
  }catch(e){notice(e.message,'error');}finally{busy=false;refreshButtons();}
 }
 async function localize(){
@@ -160,6 +176,7 @@ $('#results').addEventListener('click',async e=>{
  const b=e.target.closest('button');if(!b)return;const id=b.closest('[data-id]')?.dataset.id;
  try{
  if(b.dataset.open){openId=openId===id?null:id;raw=false;cmpSel=null;render();}
+ else if(b.hasAttribute('data-wide')){comparisonWide=!comparisonWide;render();}
  else if(b.hasAttribute('data-raw')){raw=!raw;render();}
  else if(b.hasAttribute('data-copy')){const i=[...variants,...translations()].find(i=>i.id===id);await navigator.clipboard.writeText(i.html);notice('HTML copied.','success');}
  else if(b.dataset.copyitem){const it=[...variants,...translations()].find(x=>x.id===b.dataset.copyitem);if(it){await navigator.clipboard.writeText(it.html);notice('HTML copied.','success');}}
@@ -179,8 +196,8 @@ $('#loadLibrary').onclick=async()=>{try{const i=await api('/api/library/'+$('#li
 $('#saveSeed').onclick=()=>createDraft(true);$('#genVar').onclick=()=>createDraft(false);$('#localize').onclick=localize;$('#stop').onclick=()=>{stop=true;notice('Stopping after the current request finishes. Completed work stays saved.');};
 $('#refresh').onclick=()=>reload().then(()=>notice('Workspace refreshed.','success')).catch(e=>notice(e.message,'error'));
 $('#langs').onchange=refreshButtons;
-function updateRedesignNote(){const r=varMode()==='redesign';const n=$('#redesignNote');if(!n)return;n.hidden=!r;if(r)n.textContent=hasEngine?'Each version uses a different curated design + palette. Placeholders stay intact and nothing is sent.':'Redesign needs the local MJML engine, which is not installed. Run: python -m pip install mjml-python';}
-document.querySelectorAll('input[name=varmode]').forEach(el=>el.addEventListener('change',updateRedesignNote));
+function updateRedesignNote(){const r=varMode()==='redesign';$('#designControls').hidden=!r;const n=$('#redesignNote');if(!n)return;n.hidden=!r;if(r)n.textContent=hasEngine?'Create two redesigns and compare them beside the unchanged original. The original is saved automatically; each redesign uses an AI call.':'Redesign needs the local MJML engine, which is not installed. Run: python -m pip install mjml-python';}
+document.querySelectorAll('input[name=varmode]').forEach(el=>el.addEventListener('change',()=>{if(varMode()==='redesign'&&$('#amount').value==='1')$('#amount').value='2';updateRedesignNote();}));
 $('#languageSearch').oninput=()=>{const q=$('#languageSearch').value.toLowerCase();document.querySelectorAll('#langs label').forEach(l=>l.hidden=!l.textContent.toLowerCase().includes(q));};
 $('.langbar').onclick=e=>{if(!e.target.dataset.sel)return;document.querySelectorAll('#langs input').forEach(c=>c.checked=e.target.dataset.sel==='all');refreshButtons();};
 $('#export').onclick=async()=>{try{const q=new URLSearchParams();selected.forEach(id=>q.append('source_ids',id));const data=await api('/api/export?'+q);if(!data.items.length){notice('No approved translations in this selection.');return;}const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='asat-approved-translations.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice(`Exported ${data.items.length} approved translations. This JSON is a review handoff, not a database publish.`,'success');}catch(e){notice(e.message,'error');}};
@@ -190,6 +207,9 @@ window.addEventListener('beforeunload',e=>{if(busy){e.preventDefault();e.returnV
 async function init(){
  $('#tpl').value=SAMPLE;
  const health=await api('/api/health');$('#keychip').textContent=health.has_key?'AI configured':'Mock mode';$('#keychip').className='badge '+(health.has_key?'live':'pending');hasEngine=health.has_engine!==false;updateRedesignNote();
+ $('#modelInfo').textContent=health.models?`Design: ${health.models.design} · Translation: ${health.models.translation}. Natural tone adds one AI call per version.`:'';
+ for(const d of health.designs||[])$('#designStyle').add(new Option(d.label,d.key));
+ for(const p of health.palettes||[])$('#palette').add(new Option(p.charAt(0).toUpperCase()+p.slice(1),p));
  langs=await api('/api/languages');$('#langs').innerHTML=langs.map(l=>`<label><input type="checkbox" value="${l.code}">${esc(l.name)}${l.rtl?' ↔':''}</label>`).join('');
  await Promise.all([reload(),searchLibrary()]);
 }

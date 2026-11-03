@@ -29,7 +29,7 @@ def _load_dotenv():
 
 _load_dotenv()
 
-from . import languages, translate, store, library, publish, mjml_engine  # noqa: E402
+from . import languages, translate, store, library, publish, mjml_engine, provider, design  # noqa: E402
 
 app = FastAPI(title="ASAT Content Factory - Generate Console")
 
@@ -50,7 +50,10 @@ def list_languages():
 @app.get("/api/health")
 def health():
     return {"ok": True, "has_key": bool(os.environ.get("OPENROUTER_API_KEY")),
-            "has_engine": mjml_engine.available(), "engine": mjml_engine.engine_version()}
+            "has_engine": mjml_engine.available(), "engine": mjml_engine.engine_version(),
+            "models": {task: provider.model_for(task) for task in ('translation', 'design')},
+            "designs": [{'key': key, 'label': label} for key, label in design.archetype_labels()],
+            "palettes": [p['name'] for p in design.PALETTES]}
 
 
 @app.post("/api/generate")
@@ -94,6 +97,10 @@ class VariantRequest(BaseModel):
     title: str = Field(default='', max_length=200)
     humanize: bool = True                                   # second pass: read as human-written
     source_id: str = Field(default='', max_length=64)       # the saved source these variants belong to
+    copy_length: Literal['preserve', 'expanded'] = 'preserve'
+    design_style: Literal['auto', 'modern_card', 'editorial', 'spotlight', 'branded_notice',
+                          'plain_memo', 'corporate'] = 'auto'
+    palette: Literal['auto', 'indigo', 'slate', 'teal', 'maroon'] = 'auto'
 
 
 @app.post("/api/variants")
@@ -111,7 +118,8 @@ def generate_variants(req):
     group = req.source_id or ('grp-' + uuid4().hex[:12])    # group these variants (+ their saved source) as one draft
     out = []
     for k in range(n):
-        r = translate.make_variant(req.template_html, req.company_name, k, humanize=req.humanize)
+        r = translate.make_variant(req.template_html, req.company_name, k, humanize=req.humanize,
+                                   copy_length=req.copy_length)
         out.append(store.save({"index": k + 1, 'company': req.company_name, 'title': req.title,
                                'group_id': group, 'of_source': req.source_id or None, **r}))
     return {
@@ -135,16 +143,26 @@ def redesign(req: VariantRequest):
 
 def generate_redesigns(req):
     n = max(1, min(req.amount, 8))          # cap to keep cost/time bounded
-    group = req.source_id or ('grp-' + uuid4().hex[:12])    # group redesigns (+ their saved source) as one draft
+    source = lookup(req.source_id) if req.source_id else None
+    # Retain the exact input even when generation is started without Save original.
+    if source is None or source.get('html') != req.template_html:
+        source = store.save({'html': req.template_html, 'company': req.company_name,
+                             'title': req.title, 'mode': 'source', 'model': None})
+    group = source.get('group_id') or source['id']
+    comparison_id = uuid4().hex
     out = []
     for k in range(n):
-        r = translate.make_redesign(req.template_html, req.company_name, k, humanize=req.humanize)
+        r = translate.make_redesign(req.template_html, req.company_name, k, humanize=req.humanize,
+                                    copy_length=req.copy_length, design_style=req.design_style,
+                                    palette=req.palette)
         out.append(store.save({"index": k + 1, 'company': req.company_name, 'title': req.title,
-                               'group_id': group, 'of_source': req.source_id or None, **r}))
+                               'group_id': group, 'of_source': source['id'],
+                               'comparison_id': comparison_id, **r}))
     return {
         "count": len(out),
         "has_key": bool(os.environ.get("OPENROUTER_API_KEY")),
         "has_engine": mjml_engine.available(),
+        "source": source,
         "variants": out,
     }
 

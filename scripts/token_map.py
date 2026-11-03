@@ -2,7 +2,7 @@
 Email export (2026-10-15). Canonical token case = lower snake_case.
 
 Used by audit_vocab.py now and by the normalizer (Block 5) later. Whenever this
-changes, update the migration seed and docs/controlled-lists-and-variables.md too.
+changes, update the migration seed (supabase/migrations/0001_phase0_schema.sql) too.
 """
 
 # The variables seeded by migration 0001 (audit checks mapped names against this).

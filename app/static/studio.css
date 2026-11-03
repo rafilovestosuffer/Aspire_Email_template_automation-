@@ -285,9 +285,11 @@ footer span{color:var(--faint)}
 .comparebar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:2px 0 12px}
 .comparebar label{margin:0;font-weight:650;white-space:nowrap}
 .comparebar select{width:auto;min-width:220px;max-width:100%;margin:0}
-.compare{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
 .comparepane{min-width:0}
-.comparepane .preview iframe{height:460px}
+.comparepane .preview iframe{height:720px;border-radius:12px;box-shadow:0 8px 24px #14213d0a}
+.comparepane .previewlabel{min-height:32px;align-items:center;flex-wrap:wrap;line-height:1.5}
+.designstamp{display:block;font-size:10px;letter-spacing:.02em;color:var(--muted);margin-top:3px}
 .comparepane .badge{margin-left:8px}
 .comparenote{padding:26px 14px;border:1px dashed var(--border-strong);border-radius:var(--radius-xs);background:var(--surface);color:var(--muted);font-size:12px;text-align:center}
 
@@ -331,3 +333,14 @@ footer span{color:var(--faint)}
   footer{gap:10px;flex-wrap:wrap}
   .preview iframe{height:400px}
 }
+
+/* Original plus two redesigns remain visible together on desktop. */
+.compare-three{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.compare-three .previewlabel{min-height:52px}
+.compare-three .originalpane{border-top:3px solid var(--muted);padding-top:12px}
+.compare-three .comparepane:not(.originalpane){border-top:3px solid var(--accent,#2454d6);padding-top:12px}
+.compareactions{display:flex;gap:8px;flex-wrap:wrap;padding-top:12px}
+@media(max-width:900px){.compare-three{grid-template-columns:1fr}.compare-three .preview iframe{height:620px}}
+
+main.comparison-focus{grid-template-columns:minmax(0,1fr)}
+main.comparison-focus>aside{display:none}
